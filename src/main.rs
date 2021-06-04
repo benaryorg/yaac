@@ -2,9 +2,10 @@ use ::
 {
 	std::
 	{
-		fs::OpenOptions,
 		time::Duration,
 		thread,
+		fs::OpenOptions,
+		os::unix::fs::OpenOptionsExt,
 		io::
 		{
 			Read,
@@ -417,6 +418,7 @@ fn main() -> Result<()>
 							.write(true)
 							.create(true)
 							.truncate(true)
+							.mode(0o600)
 							.open(filename).context(ErrorKind::OutputFileInaccessible(filename.to_string()))
 					};
 
