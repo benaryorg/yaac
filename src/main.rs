@@ -241,13 +241,13 @@ fn main() -> Result<()>
 		.get_matches();
 
 	let directory = matches.value_of("directory").map(|dir| DirectoryUrl::Other(dir))
-		.or(matches.is_present("letsencrypt").then(|| DirectoryUrl::LetsEncrypt))
-		.or(matches.is_present("letsencrypt-staging").then(|| DirectoryUrl::LetsEncryptStaging))
+		.or_else(|| matches.is_present("letsencrypt").then(|| DirectoryUrl::LetsEncrypt))
+		.or_else(|| matches.is_present("letsencrypt-staging").then(|| DirectoryUrl::LetsEncryptStaging))
 		.map(Directory::from_url)
 		.expect("no directory url").context(ErrorKind::InvalidDirectoryUrl)?;
 
 	let email: Vec<String> = matches.values_of("email").expect("no email given").map(|email| format!("mailto:{}", email)).collect();
-	ensure!(email.len() > 0);
+	ensure!(!email.is_empty());
 
 	let generate = clap::value_t_or_exit!(matches.value_of("generate"),Generation);
 	let account =
@@ -268,7 +268,7 @@ fn main() -> Result<()>
 		}
 		else
 		{
-			let account = directory.register_account(email.clone()).context(ErrorKind::Registration)?;
+			let account = directory.register_account(email).context(ErrorKind::Registration)?;
 			let privkey = account.acme_private_key_pem().context(ErrorKind::PrivateKeyWrite)?;
 			file.write_all(privkey.as_bytes()).context(ErrorKind::PrivateKeyWrite)?;
 			account
@@ -340,7 +340,7 @@ fn main() -> Result<()>
 			dnsmasq.kill().context(ErrorKind::DnsmasqKill)?;
 			dnsmasq.wait().context(ErrorKind::DnsmasqWait)?;
 
-			let failed = err.len() > 0;
+			let failed = !err.is_empty();
 
 			for (domain,_) in ok
 			{
@@ -425,27 +425,27 @@ fn main() -> Result<()>
 					if let Some(filename) = matches.value_of("certificate")
 					{
 						let mut file = open_file(filename)?;
-						write!(&mut file,"{}\n", cert)?;
+						writeln!(&mut file,"{}", cert)?;
 					}
 					if let Some(filename) = matches.value_of("intermediate")
 					{
 						let mut file = open_file(filename)?;
-						write!(&mut file,"{}\n", intermediate)?;
+						writeln!(&mut file,"{}", intermediate)?;
 					}
 					if let Some(filename) = matches.value_of("chain")
 					{
 						let mut file = open_file(filename)?;
-						write!(&mut file,"{}\n{}\n", cert, intermediate)?;
+						writeln!(&mut file,"{}\n{}", cert, intermediate)?;
 					}
 					if let Some(filename) = matches.value_of("combined")
 					{
 						let mut file = open_file(filename)?;
-						write!(&mut file,"{}\n{}\n{}\n", cert, intermediate, key)?;
+						writeln!(&mut file,"{}\n{}\n{}", cert, intermediate, key)?;
 					}
 					if let Some(filename) = matches.value_of("root")
 					{
 						let mut file = open_file(filename)?;
-						write!(&mut file,"{}\n", root)?;
+						writeln!(&mut file,"{}", root)?;
 					}
 				},
 			}
