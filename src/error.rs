@@ -43,5 +43,7 @@ pub enum ErrorKind
     BogusCertificateParts,
     #[error("output file '{0}' is inaccessible")]
     OutputFileInaccessible(String),
+    #[error("terms of service were not accepted")]
+    TermsOfService,
 }
 

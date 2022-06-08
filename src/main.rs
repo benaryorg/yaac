@@ -6,6 +6,7 @@ use ::
 		thread,
 		fs::OpenOptions,
 		os::unix::fs::OpenOptionsExt,
+		path::PathBuf,
 		io::
 		{
 			Read,
@@ -24,15 +25,9 @@ use ::
 	},
 	clap::
 	{
-		Arg,
-		ArgGroup,
-		SubCommand,
-		app_from_crate,
-		crate_authors,
-		crate_description,
-		crate_name,
-		crate_version,
-		arg_enum
+		ArgEnum,
+		Parser,
+		Subcommand,
 	},
 	anyhow::
 	{
@@ -43,222 +38,138 @@ use ::
 	},
 };
 
-arg_enum!
+/// when to generate new files
+#[derive(ArgEnum,Clone,Hash,Debug,PartialEq,Eq)]
+enum Generation
 {
-	#[derive(Hash,Debug,PartialEq,Eq)]
-	enum Generation
-	{
-		Never,
-		Always,
-		Auto,
-	}
+	Never,
+	Always,
+	Auto,
 }
 
-arg_enum!
+/// types of ACME challenges
+#[derive(ArgEnum,Clone,Hash,Debug,PartialEq,Eq)]
+enum Challenge
 {
-	#[derive(Hash,Debug,PartialEq,Eq)]
-	enum Challenge
-	{
-		Dns01,
-	}
+	Dns01,
 }
 
 mod error;
 use error::*;
 
+/// yet another acme-client - retrieves certificates via ACME
+///
+/// Leverages the 7 day period of validation to validate and certify independently.
+/// Uses dnsmasq to pass the DNS challenge standalone.
+#[derive(Parser)]
+#[clap(author, version, about, long_about = None)]
+struct Args
+{
+	/// filename for the account key
+	#[clap(short, long, value_name = "ACCOUNT_FILE", parse(from_os_str))]
+	account: PathBuf,
+
+	/// contact email for use with ACME
+	#[clap(short, long, value_name = "EMAIL")]
+	email: Vec<String>,
+
+	/// when to generate a new account key
+	#[clap(short, long, value_name = "WHEN", arg_enum, default_value = "auto")]
+	generate: Generation,
+
+	/// whether or not to accept the tos
+	#[clap(short = 't', long)]
+	accept_tos: bool,
+
+	/// ACME directory used to query
+	#[clap(short, long, value_name = "DIRECTORY", overrides_with = "letsencrypt", overrides_with = "letsencrypt-staging", required = true)]
+	directory: Option<String>,
+
+	/// use letsencrypt directory (overrides directory)
+	#[clap(long, conflicts_with = "letsencrypt-staging")]
+	letsencrypt: bool,
+
+	/// use letsencrypt-staging directory (overrides directory)
+	#[clap(long)]
+	letsencrypt_staging: bool,
+
+	#[clap(subcommand)]
+	command: Action,
+}
+
+#[derive(Subcommand)]
+enum Action
+{
+	/// issues a certificate if all domains are pre-validated
+	Cert
+	{
+		/// domains to issue certificate for
+		domain: Vec<String>,
+
+		/// private key file
+		#[clap(long, alias = "privkey", value_name = "FILE")]
+		private_key: PathBuf,
+
+		/// file to store the certificate, intermediate, and private key in
+		#[clap(long, value_hint = clap::ValueHint::FilePath)]
+		combined: Option<PathBuf>,
+
+		/// file to store the intermediate in
+		#[clap(long, value_name = "FILE", parse(from_os_str))]
+		intermediate: Option<PathBuf>,
+
+		/// file to store the certificate and intermediate in
+		#[clap(long, value_name = "FILE", parse(from_os_str))]
+		chain: Option<PathBuf>,
+
+		/// file to store the certificate in
+		#[clap(long, value_name = "FILE", parse(from_os_str))]
+		certificate: Option<PathBuf>,
+
+		/// file to store the root certificate in
+		#[clap(long, value_name = "FILE", parse(from_os_str))]
+		root: Option<PathBuf>,
+	},
+	/// re-validates all given domains by re-validating the challenge
+	Cron
+	{
+		/// domains to re-validate
+		domain: Vec<String>,
+
+		/// which challenge to use
+		#[clap(short = 't', long, value_name = "TYPE", arg_enum, default_value = "dns01")]
+		challenge: Challenge,
+	},
+}
+
 fn main() -> Result<()>
 {
-	let matches = app_from_crate!()
-		.setting(clap::AppSettings::SubcommandRequiredElseHelp)
-		.arg(Arg::with_name("account")
-			.short("a")
-			.long("account")
-			.help("filename for the account key")
-			.takes_value(true)
-			.value_name("ACCOUNT_FILE")
-			.multiple(false)
-			.required(true)
-		)
-		.arg(Arg::with_name("email")
-			.short("e")
-			.long("email")
-			.help("contact email for use with ACME")
-			.takes_value(true)
-			.value_name("EMAIL")
-			.multiple(true)
-			.required(true)
-			.use_delimiter(false)
-			.number_of_values(1)
-		)
-		.arg(clap::Arg::with_name("generate")
-			.short("g")
-			.long("generate")
-			.value_name("WHEN")
-			.help("when to generate a new account key")
-			.possible_values(&Generation::variants())
-			.default_value("auto")
-			.case_insensitive(true)
-		)
-		.arg(Arg::with_name("accept-tos")
-			.short("t")
-			.long("accept-tos")
-			.help("whether or not to accept the tos, setting this at all regardless of value does indicate agreement")
-			.takes_value(false)
-			.multiple(false)
-			.required(true)
-		)
-		.group(ArgGroup::with_name("dir")
-			.required(true)
-			.arg("directory")
-			.arg("letsencrypt-staging")
-			.arg("letsencrypt")
-		)
-		.arg(Arg::with_name("directory")
-			.short("d")
-			.long("directory")
-			.help("ACME directory used to query")
-			.takes_value(true)
-			.value_name("DIRECTORY")
-			.multiple(false)
-			.global(true)
-		)
-		.arg(Arg::with_name("letsencrypt-staging")
-			.short("s")
-			.long("letsencrypt-staging")
-			.alias("staging")
-			.help("use the Let's Encrypt staging directory")
-			.takes_value(false)
-			.multiple(false)
-			.global(true)
-		)
-		.arg(Arg::with_name("letsencrypt")
-			.short("l")
-			.long("letsencrypt")
-			.help("use the Let's Encrypt production directory")
-			.takes_value(false)
-			.multiple(false)
-			.global(true)
-		)
-		.arg(Arg::with_name("loglevel")
-			.short("v")
-			.long("loglevel")
-			.help("loglevel to be used, if not specified uses env_logger's auto-detection")
-			.takes_value(true)
-			.value_name("LOGLEVEL")
-			.multiple(false)
-			.global(true)
-		)
-		.subcommand(SubCommand::with_name("cert")
-			.about("issues a certificate if all domains are pre-validated")
-			.arg(Arg::with_name("domain")
-				.value_name("DOMAIN")
-				.help("domains to re-validate")
-				.takes_value(true)
-				.multiple(true)
-				.required(true)
-				.use_delimiter(false)
-			)
-			.arg(clap::Arg::with_name("challenge")
-				.short("t")
-				.long("challenge")
-				.value_name("TYPE")
-				.help("which challenge to use")
-				.possible_values(&Challenge::variants())
-				.default_value("dns01")
-				.case_insensitive(true)
-			)
-			.arg(Arg::with_name("private-key")
-				.short("p")
-				.long("private-key")
-				.alias("privkey")
-				.help("private key file")
-				.takes_value(true)
-				.value_name("FILE")
-				.multiple(false)
-				.required(true)
-			)
-			.arg(Arg::with_name("combined")
-				.short("b")
-				.long("combined")
-				.help("file to store the certificate, intermediate, and private key in")
-				.takes_value(true)
-				.value_name("FILE")
-				.multiple(false)
-			)
-			.arg(Arg::with_name("intermediate")
-				.short("i")
-				.long("intermediate")
-				.help("file to store the intermediate in")
-				.takes_value(true)
-				.value_name("FILE")
-				.multiple(false)
-			)
-			.arg(Arg::with_name("chain")
-				.long("chain")
-				.help("file to store the certificate and intermediate in")
-				.takes_value(true)
-				.value_name("FILE")
-				.multiple(false)
-			)
-			.arg(Arg::with_name("certificate")
-				.short("c")
-				.long("certificate")
-				.alias("cert")
-				.help("file to store the certificate in")
-				.takes_value(true)
-				.value_name("FILE")
-				.multiple(false)
-			)
-			.arg(Arg::with_name("root")
-				.short("r")
-				.long("root")
-				.help("file to store the root certificate in")
-				.takes_value(true)
-				.value_name("FILE")
-				.multiple(false)
-			)
-		)
-		.subcommand(SubCommand::with_name("cron")
-			.about("re-validates all given domains by re-validating the challenge")
-			.arg(Arg::with_name("domain")
-				.value_name("DOMAIN")
-				.help("domains to re-validate")
-				.takes_value(true)
-				.multiple(true)
-				.required(true)
-				.use_delimiter(false)
-			)
-			.arg(clap::Arg::with_name("challenge")
-				.short("t")
-				.long("challenge")
-				.value_name("TYPE")
-				.help("which challenge to use")
-				.possible_values(&Challenge::variants())
-				.default_value("dns01")
-				.case_insensitive(true)
-			)
-		)
-		.get_matches();
+	let args = Args::parse();
 
-	let directory = matches.value_of("directory").map(|dir| DirectoryUrl::Other(dir))
-		.or_else(|| matches.is_present("letsencrypt").then(|| DirectoryUrl::LetsEncrypt))
-		.or_else(|| matches.is_present("letsencrypt-staging").then(|| DirectoryUrl::LetsEncryptStaging))
-		.map(Directory::from_url)
-		.expect("no directory url").context(ErrorKind::InvalidDirectoryUrl)?;
+	if !args.accept_tos
+	{
+		bail!(ErrorKind::TermsOfService);
+	}
 
-	let email: Vec<String> = matches.values_of("email").expect("no email given").map(|email| format!("mailto:{}", email)).collect();
+	let directory = args.directory.as_ref().map(|dir| DirectoryUrl::Other(dir))
+		.or_else(|| args.letsencrypt.then(|| DirectoryUrl::LetsEncrypt))
+		.or_else(|| args.letsencrypt_staging.then(|| DirectoryUrl::LetsEncryptStaging))
+		.expect("no directory url");
+	eprintln!("using directory: {:?}", directory);
+	let directory = Directory::from_url(directory).context(ErrorKind::InvalidDirectoryUrl)?;
+
+
+	let email: Vec<String> = args.email.iter().map(|email| format!("mailto:{}", email)).collect();
 	ensure!(!email.is_empty());
 
-	let generate = clap::value_t_or_exit!(matches.value_of("generate"),Generation);
 	let account =
 	{
-		let filename = matches.value_of("account").expect("no account file given");
 		let mut file = OpenOptions::new()
 			.read(true)
-			.write(generate != Generation::Never)
-			.create(generate != Generation::Never)
-			.truncate(generate == Generation::Always)
-			.open(filename).context(ErrorKind::AccountFileInaccessible)?;
+			.write(args.generate != Generation::Never)
+			.create(args.generate != Generation::Never)
+			.truncate(args.generate == Generation::Always)
+			.open(args.account).context(ErrorKind::AccountFileInaccessible)?;
 
 		let mut key = String::new();
 		file.read_to_string(&mut key)?;
@@ -275,20 +186,15 @@ fn main() -> Result<()>
 		}
 	};
 
-	match matches.subcommand()
+	match args.command
 	{
-		("cron",Some(matches)) =>
+		Action::Cron { domain, .. } =>
 		{
-			let (domain, alts) =
-			{
-				let mut iter = matches.values_of("domain").expect("no domain given");
-				let first = iter.next().expect("no domains given");
-				(first,iter.collect::<Vec<_>>())
-			};
+			let (domain, alts) = domain.split_first().expect("no domains given");
 
-			let order = account.new_order(domain,&alts).context(ErrorKind::OrderCreation)?;
+			let order = account.new_order(domain, &alts.iter().map(|s| s.as_str()).collect::<Vec<_>>()).context(ErrorKind::OrderCreation)?;
 			let auths = order.authorizations().context(ErrorKind::AuthorizationRetrieval)?;
-			let challenges = auths.into_iter()
+			let challenges = auths.iter()
 				.inspect(|auth|
 				{
 					eprintln!("auth for '{}' needs auth?: {}", auth.domain_name(), auth.need_challenge());
@@ -361,16 +267,11 @@ fn main() -> Result<()>
 				Ok(())
 			}
 		},
-		("cert",Some(matches)) =>
+		Action::Cert { domain, private_key, certificate, intermediate, chain, combined, root, } =>
 		{
-			let (domain, alts) =
-			{
-				let mut iter = matches.values_of("domain").expect("no domain given");
-				let first = iter.next().expect("no domains given");
-				(first,iter.collect::<Vec<_>>())
-			};
+			let (domain, alts) = domain.split_first().expect("no domains given");
 
-			let mut order = account.new_order(domain,&alts).context(ErrorKind::OrderCreation)?;
+			let mut order = account.new_order(domain, &alts.iter().map(|s| s.as_str()).collect::<Vec<_>>()).context(ErrorKind::OrderCreation)?;
 			let auths = order.authorizations().context(ErrorKind::AuthorizationRetrieval)?;
 			let missing = auths.iter().filter(|auth| auth.need_challenge()).map(|auth| auth.domain_name().to_string()).collect::<Vec<_>>();
 			if !missing.is_empty()
@@ -388,14 +289,12 @@ fn main() -> Result<()>
 				{
 					let order =
 					{
-						let keyfile = matches.value_of("private-key").unwrap();
-
 						let mut file = OpenOptions::new()
 							.read(true)
 							.write(false)
 							.create(false)
 							.truncate(false)
-							.open(keyfile).context(ErrorKind::AccountFileInaccessible)?;
+							.open(&private_key).context(ErrorKind::AccountFileInaccessible)?;
 
 						let mut key = String::new();
 						file.read_to_string(&mut key)?;
@@ -406,12 +305,12 @@ fn main() -> Result<()>
 					let parts = response.certificate().split("\n\n").collect::<Vec<_>>();
 
 					ensure!(parts.len() == 3, ErrorKind::BogusCertificateParts);
-					let cert = parts[0];
-					let intermediate = parts[1];
-					let root = parts[2];
-					let key = response.private_key();
+					let parts_cert = parts[0];
+					let parts_intermediate = parts[1];
+					let parts_root = parts[2];
+					let parts_key = response.private_key();
 
-					let open_file = |filename: &str|
+					let open_file = |filename: PathBuf|
 					{
 						OpenOptions::new()
 							.read(false)
@@ -419,40 +318,39 @@ fn main() -> Result<()>
 							.create(true)
 							.truncate(true)
 							.mode(0o600)
-							.open(filename).context(ErrorKind::OutputFileInaccessible(filename.to_string()))
+							.open(filename.as_path()).with_context(|| ErrorKind::OutputFileInaccessible(filename.to_string_lossy().to_string()))
 					};
 
-					if let Some(filename) = matches.value_of("certificate")
+					if let Some(filename) = certificate
 					{
 						let mut file = open_file(filename)?;
-						writeln!(&mut file,"{}", cert)?;
+						writeln!(&mut file, "{}", parts_cert)?;
 					}
-					if let Some(filename) = matches.value_of("intermediate")
+					if let Some(filename) = intermediate
 					{
 						let mut file = open_file(filename)?;
-						writeln!(&mut file,"{}", intermediate)?;
+						writeln!(&mut file, "{}", parts_intermediate)?;
 					}
-					if let Some(filename) = matches.value_of("chain")
+					if let Some(filename) = chain
 					{
 						let mut file = open_file(filename)?;
-						writeln!(&mut file,"{}\n{}", cert, intermediate)?;
+						writeln!(&mut file, "{}\n{}", parts_cert, parts_intermediate)?;
 					}
-					if let Some(filename) = matches.value_of("combined")
+					if let Some(filename) = combined
 					{
 						let mut file = open_file(filename)?;
-						writeln!(&mut file,"{}\n{}\n{}", cert, intermediate, key)?;
+						writeln!(&mut file, "{}\n{}\n{}", parts_cert, parts_intermediate, parts_key)?;
 					}
-					if let Some(filename) = matches.value_of("root")
+					if let Some(filename) = root
 					{
 						let mut file = open_file(filename)?;
-						writeln!(&mut file,"{}", root)?;
+						writeln!(&mut file, "{}", parts_root)?;
 					}
 				},
 			}
 
 			Ok(())
 		},
-		_ => unreachable!(),
 	}
 }
 
