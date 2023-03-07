@@ -25,9 +25,9 @@ use ::
 	},
 	clap::
 	{
-		ArgEnum,
 		Parser,
 		Subcommand,
+		ValueEnum,
 	},
 	anyhow::
 	{
@@ -39,18 +39,22 @@ use ::
 };
 
 /// when to generate new files
-#[derive(ArgEnum,Clone,Hash,Debug,PartialEq,Eq)]
+#[derive(Clone,Hash,Debug,PartialEq,Eq,ValueEnum)]
 enum Generation
 {
+	/// never generate the file, fail if it does not exist yet
 	Never,
+	/// always generate the file, overwrite existing files
 	Always,
+	/// generate the file if it does not exist yet
 	Auto,
 }
 
 /// types of ACME challenges
-#[derive(ArgEnum,Clone,Hash,Debug,PartialEq,Eq)]
+#[derive(Clone,Hash,Debug,PartialEq,Eq,ValueEnum)]
 enum Challenge
 {
+	/// use the dns-01 challenge
 	Dns01,
 }
 
@@ -66,7 +70,7 @@ use error::*;
 struct Args
 {
 	/// filename for the account key
-	#[clap(short, long, value_name = "ACCOUNT_FILE", parse(from_os_str))]
+	#[clap(short, long, value_name = "ACCOUNT_FILE")]
 	account: PathBuf,
 
 	/// contact email for use with ACME
@@ -74,7 +78,7 @@ struct Args
 	email: Vec<String>,
 
 	/// when to generate a new account key
-	#[clap(short, long, value_name = "WHEN", arg_enum, default_value = "auto")]
+	#[clap(short, long, value_name = "WHEN", default_value = "auto")]
 	generate: Generation,
 
 	/// whether or not to accept the tos
@@ -82,11 +86,11 @@ struct Args
 	accept_tos: bool,
 
 	/// ACME directory used to query
-	#[clap(short, long, value_name = "DIRECTORY", overrides_with = "letsencrypt", overrides_with = "letsencrypt-staging", required = true)]
+	#[clap(short, long, value_name = "DIRECTORY", overrides_with = "letsencrypt", overrides_with = "letsencrypt_staging", required = true)]
 	directory: Option<String>,
 
 	/// use letsencrypt directory (overrides directory)
-	#[clap(long, conflicts_with = "letsencrypt-staging")]
+	#[clap(long, conflicts_with = "letsencrypt_staging")]
 	letsencrypt: bool,
 
 	/// use letsencrypt-staging directory (overrides directory)
@@ -115,19 +119,19 @@ enum Action
 		combined: Option<PathBuf>,
 
 		/// file to store the intermediate in
-		#[clap(long, value_name = "FILE", parse(from_os_str))]
+		#[clap(long, value_name = "FILE")]
 		intermediate: Option<PathBuf>,
 
 		/// file to store the certificate and intermediate in
-		#[clap(long, value_name = "FILE", parse(from_os_str))]
+		#[clap(long, value_name = "FILE")]
 		chain: Option<PathBuf>,
 
 		/// file to store the certificate in
-		#[clap(long, value_name = "FILE", parse(from_os_str))]
+		#[clap(long, value_name = "FILE")]
 		certificate: Option<PathBuf>,
 
 		/// file to store the root certificate in
-		#[clap(long, value_name = "FILE", parse(from_os_str))]
+		#[clap(long, value_name = "FILE")]
 		root: Option<PathBuf>,
 	},
 	/// re-validates all given domains by re-validating the challenge
@@ -137,7 +141,7 @@ enum Action
 		domain: Vec<String>,
 
 		/// which challenge to use
-		#[clap(short = 't', long, value_name = "TYPE", arg_enum, default_value = "dns01")]
+		#[clap(short = 't', long, value_name = "TYPE", default_value = "dns01")]
 		challenge: Challenge,
 	},
 }
