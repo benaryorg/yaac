@@ -156,8 +156,8 @@ fn main() -> Result<()>
 	}
 
 	let directory = args.directory.as_ref().map(|dir| DirectoryUrl::Other(dir))
-		.or_else(|| args.letsencrypt.then(|| DirectoryUrl::LetsEncrypt))
-		.or_else(|| args.letsencrypt_staging.then(|| DirectoryUrl::LetsEncryptStaging))
+		.or_else(|| args.letsencrypt.then_some(DirectoryUrl::LetsEncrypt))
+		.or_else(|| args.letsencrypt_staging.then_some(DirectoryUrl::LetsEncryptStaging))
 		.expect("no directory url");
 	eprintln!("using directory: {:?}", directory);
 	let directory = Directory::from_url(directory).context(ErrorKind::InvalidDirectoryUrl)?;
@@ -298,7 +298,7 @@ fn main() -> Result<()>
 							.write(false)
 							.create(false)
 							.truncate(false)
-							.open(&private_key).context(ErrorKind::AccountFileInaccessible)?;
+							.open(private_key).context(ErrorKind::AccountFileInaccessible)?;
 
 						let mut key = String::new();
 						file.read_to_string(&mut key)?;
