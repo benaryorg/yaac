@@ -1,6 +1,6 @@
 [package]
 name = "yaac"
-version = "1.0.5"
+version = "1.0.6"
 authors = ["benaryorg <binary@benary.org>"]
 edition = "2018"
 license = "ISC"
