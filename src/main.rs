@@ -16,6 +16,8 @@ use ::
 		{
 			Command,
 			Stdio,
+			ExitCode,
+			Termination,
 		},
 	},
 	acme_micro::
@@ -146,7 +148,31 @@ enum Action
 	},
 }
 
-fn main() -> Result<()>
+fn main() -> ExitCode
+{
+	let result = exec();
+
+	// store the inner error if possible
+	let alt_exit_code = match result
+	{
+		Err(ref err) => match err.downcast_ref::<ErrorKind>()
+		{
+			// override return code for transient errors (EAGAIN = 11)
+			Some(ErrorKind::DnsmasqPremature(_)) => Some(ExitCode::from(11)),
+
+			_ => None,
+		},
+		_ => None,
+	};
+
+	// this prints the error message
+	let exit_code = result.report();
+
+	// use the alternative exit code first
+	alt_exit_code.unwrap_or(exit_code)
+}
+
+fn exec() -> Result<()>
 {
 	let args = Args::parse();
 
