@@ -3,7 +3,7 @@ name = "yaac"
 version = "1.0.6"
 authors = ["benaryorg <binary@benary.org>"]
 edition = "2018"
-license = "ISC"
+license = "AGPL-3.0-or-later"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
